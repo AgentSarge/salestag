@@ -1,9 +1,9 @@
 version: 4.40.0
-installed_at: '2025-08-19T22:57:16.079Z'
+installed_at: '2025-08-21T00:52:09.403Z'
 install_type: full
 agent: null
 ides_setup:
-  - cursor
+  - claude-code
 expansion_packs: []
 files:
   - path: .bmad-core/working-in-the-brownfield.md
@@ -17,12 +17,6 @@ files:
     modified: false
   - path: .bmad-core/core-config.yaml
     hash: 073cf6d2527c545d
-    modified: false
-  - path: .bmad-core/utils/workflow-management.md
-    hash: c2196880f2281f84
-    modified: false
-  - path: .bmad-core/utils/bmad-doc-template.md
-    hash: 34df6ead8b91abfc
     modified: false
   - path: .bmad-core/workflows/greenfield-ui.yaml
     hash: defde5d6bdcedd49
@@ -41,6 +35,12 @@ files:
     modified: false
   - path: .bmad-core/workflows/brownfield-fullstack.yaml
     hash: 60a703d65da43d27
+    modified: false
+  - path: .bmad-core/utils/workflow-management.md
+    hash: c2196880f2281f84
+    modified: false
+  - path: .bmad-core/utils/bmad-doc-template.md
+    hash: 34df6ead8b91abfc
     modified: false
   - path: .bmad-core/templates/story-tmpl.yaml
     hash: 11e79b87ff700c8f

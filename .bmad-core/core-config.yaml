@@ -14,9 +14,6 @@ architecture:
   architectureShardedLocation: docs/architecture
 customTechnicalDocuments: null
 devLoadAlwaysFiles:
-  - docs/prd.md
-  - docs/architecture.md
-  - docs/hardware/README.md
   - docs/architecture/coding-standards.md
   - docs/architecture/tech-stack.md
   - docs/architecture/source-tree.md
