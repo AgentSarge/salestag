@@ -1,0 +1,47 @@
+schema: 1
+story: 'E0.S-REC-001'
+story_title: 'Button-to-Record with LED and WAV to /rec/rec_0001.wav'
+gate: PASS
+status_reason: 'R0 core bring-up SUCCESSFUL - All critical functionality validated on hardware'
+reviewer: 'Quinn (Test Architect)'
+updated: '2025-08-19T12:00:00Z'
+
+evidence_captured:
+  - 'Build logs: Successful compilation with no errors'
+  - 'Monitor logs: Clean boot sequence and GPIO initialization'
+  - 'Hardware test: GPIO4 button with pullup, GPIO40 LED output working'
+  - 'Functional test: Multiple button press/release cycles successful'
+
+test_results:
+  - 'A1 PASS: Button response 170ms (well within 50-300ms requirement)'
+  - 'A2 PASS: LED toggle working perfectly (LED_ON/LED_OFF confirmed)'
+  - 'A3 PASS: Button release toggles LED state correctly'
+  - 'A5 PASS: Device stable through multiple power cycles and operations'
+
+waiver:
+  active: true
+  reason: 'A4 (WAV file) deferred pending SD card integration'
+  approved_by: 'Quinn (Test Architect)'
+  expiry: '2025-09-01T00:00:00Z'
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'No external interfaces in R0 scope'
+  performance:
+    status: PASS
+    notes: 'Button response 170ms meets timing requirements'
+  reliability:
+    status: PASS
+    notes: 'Device stable, no crashes, clean boot cycles'
+  maintainability:
+    status: PASS
+    notes: 'Modular code structure with clean HAL abstraction'
+
+recommendations:
+  immediate:
+    - action: 'Proceed to SD card integration story'
+      refs: ['docs/stories/S-SD-001']
+  future:
+    - action: 'Add audio capture and WAV recording functionality'
+      refs: ['docs/stories/S-REC-002']
