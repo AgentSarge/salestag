@@ -1,0 +1,1 @@
+cd /Users/self/Desktop/salestag/softwareV2 && . ~/esp/esp-idf/export.sh && idf.py -p /dev/cu.usbmodem101 monitor
