@@ -1,0 +1,154 @@
+# SalesTag Project .gitignore
+
+# ===== ESP-IDF Build Files =====
+# Build directories
+**/build/
+**/build-*/
+**/out/
+
+# ESP-IDF specific files
+**/sdkconfig.old
+**/.config
+**/.cache
+**/managed_components/
+**/dependencies.lock
+
+# ESP-IDF generated files
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/Makefile
+**/compile_commands.json
+**/project_description.json
+**/flasher_args.json
+**/flash_args
+**/flash_bootloader_args
+**/flash_project_args
+**/partition-table-flash_args
+**/app-flash_args.in
+**/flasher_args.json.in
+
+# ESP-IDF logs
+**/log/
+**/idf_py_*.log
+
+# ESP-IDF binaries and objects
+**/*.bin
+**/*.elf
+**/*.map
+**/*.obj
+**/*.o
+**/*.a
+**/*.so
+**/*.dylib
+**/*.dll
+
+# ESP-IDF partitions
+**/partition_table/
+**/partitions.csv
+
+# ===== Software Version Directories =====
+# Build files for all software versions
+softwareV2/build/
+softwareV3/build/
+softwareV4/build/
+
+# SDK config files (keep sdkconfig, ignore old versions)
+**/sdkconfig.old
+**/.config
+
+# ===== Temporary and Cache Files =====
+*.tmp
+*.temp
+.downloaded_files.txt
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.py[cod]
+*$py.class
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== Audio and Media Files =====
+# Audio recordings (keep these out of repo)
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# ===== Log Files =====
+*.log
+logs/
+*.out
+
+# ===== OS Generated Files =====
+Thumbs.db
+.directory
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# ===== Hardware and Production Files =====
+# Gerber files (PCB manufacturing)
+**/Gerber/
+**/*.gbr
+**/*.drl
+**/*.gko
+**/*.gtl
+**/*.gbl
+**/*.gto
+**/*.gbo
+**/*.gtp
+**/*.gbp
+**/*.gts
+**/*.gbs
+
+# BOM and production files
+**/BOM.csv
+**/PickAndPlace.csv
+**/Production/
+
+# ===== Documentation Build Files =====
+# If you generate docs
+docs/_build/
+docs/build/
+
+# ===== Environment and Secrets =====
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.key
+*.pem
+*.p12
+
+# ===== Backup Files =====
+*.bak
+*.backup
+*~
