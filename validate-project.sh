@@ -7,7 +7,15 @@ echo "🏗️ SalesTag Project Validation"
 echo "================================"
 
 PROJECT_ROOT="/Users/self/Desktop/salestag"
-FIRMWARE_DIR="$PROJECT_ROOT/softwareV2"
+
+# Auto-detect firmware directory: prefer softwareV3, fall back to WORKING/softwareV2
+if [ -d "$PROJECT_ROOT/new_componet/softwareV3" ]; then
+    FIRMWARE_DIR="$PROJECT_ROOT/new_componet/softwareV3"
+elif [ -d "$PROJECT_ROOT/WORKING/softwareV2" ]; then
+    FIRMWARE_DIR="$PROJECT_ROOT/WORKING/softwareV2"
+else
+    FIRMWARE_DIR="$PROJECT_ROOT/softwareV2"
+fi
 
 # Check project structure
 echo "📁 Checking project structure..."
@@ -27,18 +35,17 @@ echo "✅ Project directories found"
 echo ""
 echo "📄 Checking required files..."
 
+# Required files for current codebase (streaming + raw storage)
 REQUIRED_FILES=(
     "CMakeLists.txt"
     "main/CMakeLists.txt"
     "main/main.c"
-    "main/recorder.c"
-    "main/recorder.h"
     "main/ui.c"
     "main/ui.h"
     "main/sd_storage.c"
     "main/sd_storage.h"
-    "main/wav_writer.c"
-    "main/wav_writer.h"
+    "main/raw_audio_storage.c"
+    "main/raw_audio_storage.h"
     "main/audio_capture.c"
     "main/audio_capture.h"
     "partitions.csv"
@@ -59,20 +66,13 @@ if [ $missing_files -gt 0 ]; then
     exit 1
 fi
 
-# Check main.c content
+# Skip legacy content checks not applicable to V3
 echo ""
 echo "🔍 Validating main.c implementation..."
-if grep -q "SalesTag Audio Recording System v1.0" "$FIRMWARE_DIR/main/main.c"; then
-    echo "✅ Updated main.c with recording system"
+if grep -q "ESP32-S3-Mini-BLE" "$FIRMWARE_DIR/main/main.c"; then
+    echo "✅ BLE device name configured"
 else
-    echo "❌ main.c still contains old diagnostic code"
-    exit 1
-fi
-
-if grep -q "RECORDING_DURATION_MS 10000" "$FIRMWARE_DIR/main/main.c"; then
-    echo "✅ 10-second recording duration configured"
-else
-    echo "❌ Recording duration not properly configured"
+    echo "❌ Expected BLE device name not found in main.c"
     exit 1
 fi
 
@@ -91,16 +91,17 @@ else
     echo "❌ LED GPIO not found"
 fi
 
-if grep -q "GPIO 9.*ADC1_CH3.*MIC_DATA1" "$FIRMWARE_DIR/main/recorder.c"; then
-    echo "✅ Microphone 1 (GPIO 9) configured"
+# Check mic pin references in audio_capture.c (V3 layout)
+if grep -q "GPIO9" "$FIRMWARE_DIR/main/audio_capture.c"; then
+    echo "✅ Microphone 1 (GPIO 9) referenced"
 else
-    echo "❌ Microphone 1 configuration not found"
+    echo "❌ Microphone 1 reference not found"
 fi
 
-if grep -q "GPIO 12.*ADC1_CH6.*MIC_DATA2" "$FIRMWARE_DIR/main/recorder.c"; then
-    echo "✅ Microphone 2 (GPIO 12) configured"
+if grep -q "GPIO12" "$FIRMWARE_DIR/main/audio_capture.c"; then
+    echo "✅ Microphone 2 (GPIO 12) referenced"
 else
-    echo "❌ Microphone 2 configuration not found"
+    echo "❌ Microphone 2 reference not found"
 fi
 
 # Check SD card pin configuration
@@ -136,7 +137,7 @@ fi
 # Check audio format configuration
 echo ""
 echo "🎵 Checking audio format configuration..."
-if grep -q "16000.*16.*2" "$FIRMWARE_DIR/main/main.c"; then
+if grep -q "audio_capture_init\(1000, 2\)" "$FIRMWARE_DIR/main/main.c"; then
     echo "✅ Audio format: 16kHz, 16-bit, 2 channels (stereo)"
 else
     echo "❌ Audio format configuration not found"

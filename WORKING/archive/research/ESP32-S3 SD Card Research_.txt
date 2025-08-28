@@ -1,0 +1,260 @@
+﻿Comprehensive Analysis of Multi-Channel Audio Recording with ESP32-S3 and SD Card Peripherals
+
+
+
+
+1. Executive Summary
+
+
+This report provides a detailed technical guide for developing a high-performance, multi-channel audio capture and data logging system using the ESP32-S3 microcontroller and a micro-SD card. The analysis focuses on critical hardware and software architecture decisions required to achieve a robust and reliable system capable of handling high-fidelity audio streams.
+The key findings and recommendations are as follows:
+* Audio Input: For high-quality, continuous audio capture, the ESP32-S3’s internal Analog-to-Digital Converters (ADCs) are not recommended. The optimal hardware stack consists of a multi-microphone array using the I2S (Inter-IC Sound) protocol. This approach leverages dedicated hardware with Direct Memory Access (DMA), which offloads continuous data streaming from the central processing unit (CPU), ensuring a consistent sample rate and freeing up processing power for other tasks.
+* Data Storage: For continuous, high-speed data logging to a micro-SD card, the SDMMC protocol is superior to the more common SPI protocol. While SPI is simpler to implement, SDMMC offers significantly higher throughput, especially when configured for 4-bit data transfer. This is crucial for sustaining the high data rates of multi-channel audio streams.
+* System Architecture: The system architecture requires a multi-threaded firmware design using a real-time operating system (RTOS) such as FreeRTOS. One task should be dedicated to handling the continuous audio data stream from the I2S peripheral, buffering it in the ESP32-S3’s PSRAM. A separate, lower-priority task should then manage the intermittent writing of large data blocks to the SD card. This approach prevents data loss that can occur when the SD card’s internal wear-leveling processes introduce unexpected delays.
+* Noise Mitigation: A successful audio project must address electrical noise. Powering microphones directly from the ESP32-S3's 3.3V power pin can introduce significant noise. Mitigating this requires implementing hardware solutions, such as external low-dropout (LDO) regulators and decoupling capacitors, as well as software techniques like oversampling and digital filtering.
+
+
+2. Foundations of Audio & Data on the ESP32-S3
+
+
+
+
+2.1. The ESP32-S3 SoC Architecture
+
+
+The ESP32-S3 is a System on a Chip (SoC) featuring a dual-core Xtensa LX7 microprocessor capable of operating at clock speeds up to 240 MHz.1 This architecture is particularly well-suited for embedded applications that require parallel processing, such as simultaneously handling complex audio algorithms and managing high-speed data transfer. The SoC integrates a rich set of peripherals crucial for this type of project, including Analog-to-Digital Converters (ADCs), two I2S interfaces, four SPI interfaces, and an SDIO host controller.2
+A significant advantage of the ESP32-S3, especially for audio and data logging, is its support for external Quad SPI (QSPI) flash and Pseudo-static RAM (PSRAM). Certain ESP32-S3 modules, such as the WROOM-1, integrate up to 8 MB of PSRAM directly in the package.2 This large, accessible RAM is a game-changer for high-throughput applications, as it can be used for buffering large amounts of data, a necessity for smooth, continuous audio recording.6 The availability of this resource allows a developer to manage sudden, brief delays in a data pipeline without compromising the integrity of the data stream.
+
+
+2.2. A Primer on Embedded Audio Capture
+
+
+Sound is an inherently analog phenomenon. For a microcontroller to process or store audio, the analog signal must first be converted into a digital representation.9 The quality of this digital signal is determined by two key parameters: the sampling rate and the bit depth. The sampling rate defines how many samples of the analog signal are taken per second, while the bit depth, or resolution, determines the number of bits used to represent the amplitude of each sample.9 A higher sampling rate and bit depth result in a higher-quality digital signal but also a larger data file.
+According to the Nyquist theorem, to accurately capture a signal of a certain frequency, the sampling rate must be at least twice the highest frequency present in that signal.9 For high-quality audio that captures the full range of human hearing (up to 20 kHz), a minimum sampling rate of 40 kHz is required to prevent a phenomenon known as aliasing, which can introduce artifacts and distortion into the final digital signal.10 Achieving and maintaining this high sampling rate consistently is one of the primary challenges for a project of this nature.
+
+
+3. Audio Input: ADC vs. I2S
+
+
+The choice of audio input method is the most fundamental architectural decision for this project. The ESP32-S3 offers two primary options: its internal Analog-to-Digital Converters (ADCs) or a dedicated I2S peripheral.
+
+
+3.1. Analog Audio with Internal ADCs
+
+
+The ESP32-S3 is equipped with two 12-bit Successive Approximation Register (SAR) ADCs, providing a total of 20 analog input channels. ADC1 features 10 channels (GPIO1–GPIO10), and ADC2 also offers 10 channels (GPIO11–GPIO20).4 The Arduino framework simplifies the process of reading these analog inputs with the
+analogRead() function, which captures a single ADC value at a time in what is known as "one-shot" mode.13
+While convenient for simple sensor readings, the internal ADCs have significant drawbacks for high-fidelity audio. The first is a non-linear voltage response, particularly at the low and high ends of the measurement range. The readings may not be able to distinguish between, for example, 0 V and 0.1 V, or 3.2 V and 3.3 V.13 For more accurate readings, calibration is necessary using APIs that account for variations in the internal reference voltage.15
+The most critical limitation of this approach is a conflict between ADC2 and the Wi-Fi driver. A well-documented issue on the ESP32 platform is that ADC2 pins cannot be used for analog readings when the Wi-Fi radio is active. The problem is not a simple software issue but is rooted in the SoC's internal power routing. When the Wi-Fi radio is turned on, power is diverted from the ADC2 peripheral, rendering its readings unreliable.13 This poses a major design constraint for any project that requires simultaneous audio capture and network connectivity, forcing a choice between a full set of analog pins and Wi-Fi functionality.
+
+
+3.2. I2S for High-Fidelity Audio
+
+
+The I2S (Inter-IC Sound) protocol is a synchronous serial communication protocol specifically designed for transmitting digital audio data between integrated circuits.9 It is the recommended method for capturing high-fidelity audio with the ESP32-S3. I2S communication uses three primary signal lines: the Serial Clock (SCK or BCLK), Word Select (WS), which differentiates between left and right audio channels, and Serial Data (SD), which carries the audio payload.9
+The most significant advantage of the I2S peripheral over the internal ADCs is its dedicated Direct Memory Access (DMA) controller.9 With the ADC approach, achieving a high sampling rate requires the CPU to continuously poll for new data, a process that becomes computationally expensive and inefficient. In a project that requires a 40 kHz sampling rate, the CPU would be constantly occupied, leading to inconsistent sampling periods and introducing audible artifacts into the audio signal.10 In contrast, the DMA controller handles the continuous data stream independently of the CPU, streaming the audio samples directly into RAM buffers in the background.10 This frees the dual-core processor to perform other demanding tasks, such as real-time audio processing or high-speed data logging to an SD card.
+
+
+3.3. Comparative Analysis of Microphones
+
+
+A variety of microphone modules are available for use with the ESP32-S3, each with its own advantages and disadvantages.
+* Analog Microphones: Modules like the MAX4466 and MAX9814 are popular choices for hobbyist projects.18 These modules produce an analog voltage output proportional to the sound pressure level, which must be read by the ESP32-S3’s ADCs. The MAX9814 features Automatic Gain Control (AGC), which automatically adjusts the amplification to prevent clipping, and offers selectable gain settings of 40 dB, 50 dB, and 60 dB.22 A major challenge with these analog microphones is their high susceptibility to electrical noise, particularly from the ESP32’s power supply.23
+* Digital I2S Microphones: I2S Micro-Electro-Mechanical Systems (MEMS) microphones, such as the INMP441, are highly recommended for professional-grade applications.9 These modules contain a high-quality ADC directly on the microphone breakout board, converting the analog sound signal to a digital I2S stream before it reaches the microcontroller.9 This approach effectively isolates the analog signal from the noisy power rails of the ESP32, resulting in a cleaner digital audio stream. The I2S interface is compatible with the ESP32-S3’s I2S peripheral, allowing for seamless DMA-based data capture.
+A summary of the comparison is provided in the table below.
+Feature
+	Analog Microphone (e.g., MAX9814)
+	I2S Microphone (e.g., INMP441)
+	Required Pins
+	1 (Analog-capable GPIO)
+	3-5 (I2S-capable GPIOs)
+	Signal Type
+	Analog voltage output
+	Digital I2S stream
+	On-board ADC
+	No (Relies on ESP32’s ADC)
+	Yes
+	Noise Susceptibility
+	High (susceptible to power supply noise)
+	Low (isolates analog signal at source)
+	Cost
+	Generally lower
+	Generally higher
+	Ideal Use Case
+	Simple sound detection, low-quality audio, projects without Wi-Fi
+	High-fidelity audio recording, real-time voice processing, multi-channel arrays
+	
+
+4. Advanced Audio Processing and Multi-Mic Arrays
+
+
+
+
+4.1. The Espressif Audio Front-end (AFE) Framework
+
+
+The ESP32-S3 is a formidable platform for advanced audio applications, supported by the Espressif Audio Front-end (AFE) framework. This framework is a collection of optimized software algorithms designed to process audio data for tasks like speech recognition and voice communication.28 Key algorithms within the AFE framework include Acoustic Echo Cancellation (AEC), which can remove echo from a two-microphone input signal, and Noise Suppression (NS), which can suppress stationary, non-human noise in a single-channel audio stream. The framework also supports Voice Activity Detection (VAD) and Wake Word Detection (WakeNet) for voice-activated applications.28
+
+
+4.2. Sound Source Localization (Direction of Arrival)
+
+
+A multi-microphone array can enable a device to determine the direction of a sound source, a technique known as Direction of Arrival (DoA).18 The system processes the audio signals from multiple microphones in real-time to identify which microphone receives the strongest signal, indicating the direction of the sound. This can be achieved by applying a Fast Fourier Transform (FFT) to the raw sound data to convert it into the frequency domain, where the magnitude of a target frequency can be compared across microphones to pinpoint the source.18
+A robust DoA system depends not only on a powerful processor and sophisticated software but also on meticulous physical hardware design. To ensure a successful implementation, all microphones within the array must be of the same omnidirectional MEMS type from the same manufacturer. For a two-microphone array, the distance between the microphones should be carefully set between 4 and 6.5 cm, with their connecting axis running parallel to the horizontal line.31 The design guidelines for a three-microphone array specify that the microphones be equally spaced in a perfect circle, with a 120° angle between them and a spacing also between 4 and 6.5 cm.31
+It is imperative that the electrical characteristics of all microphones in the array are consistent. The sensitivity difference among microphones in the same array should not exceed 3 dB, and their phase difference must be within 10°.31 A developer who overlooks these precise physical and electrical requirements, assuming that code alone will solve the problem, is likely to find that their DoA system fails to perform as expected due to signal inconsistencies.
+A summary of multi-mic array design guidelines is provided below.
+Parameter
+	Recommendation
+	Significance
+	Microphone Type
+	Same omnidirectional MEMS model from same manufacturer
+	Ensures consistent signal characteristics for accurate comparisons.
+	Spacing
+	4 to 6.5 cm between microphones
+	Optimizes time-of-arrival difference for sound source triangulation.
+	Sensitivity Difference
+	Within 3 dB
+	Prevents false detection from one microphone being inherently louder than others.
+	Phase Difference
+	Within 10°
+	Ensures signals arrive in a consistent, predictable phase relationship.
+	Structural Design
+	Same for all microphones in array
+	Minimizes variations in pickup and resonance frequencies.
+	
+
+5. Data Storage: The SD Card Interface
+
+
+
+
+5.1. SPI Communication for SD Cards
+
+
+The Serial Peripheral Interface (SPI) protocol is a widely used, four-wire synchronous communication interface for microcontrollers and peripherals.32 For SD card communication, the ESP32-S3’s SPI interface uses four key lines: Master Out Slave In (MOSI), Master In Slave Out (MISO), Serial Clock (SCK), and Chip Select (CS).32 The ESP32-S3 has multiple hardware SPI peripherals (SPI2 and SPI3), and its flexible I/O matrix allows these SPI functions to be mapped to virtually any available GPIO pin.4
+For software, the standard SD.h library is simple and provides basic file-handling capabilities (read, write, create, delete).35 A more advanced alternative is the
+SdFat.h library, which is known for its improved performance, reliability, and support for the exFAT file system.37 One user reported a significant performance increase with
+SdFat.h, achieving a write speed of almost 1 MB/s when writing large data chunks.40
+
+
+5.2. SDMMC: The High-Performance Alternative
+
+
+The ESP32-S3 features a native SDMMC host peripheral, which offers a higher-performance alternative to the SPI protocol for communicating with SD cards. Unlike the single data line of SPI, the SDMMC protocol can operate in 1-bit, 4-bit, or even 8-bit modes, with the 4-bit mode providing a significant speed boost that is essential for continuous audio logging.41
+A user reported writing to an SD card via SPI at a respectable 979.20 KB/s, while another developer found SDMMC to be "really slow" at 150 KB/s in one instance.40 This apparent contradiction highlights a crucial point: the raw protocol's theoretical speed is not the sole determinant of real-world performance. The method of data transfer, including whether data is written in large, aligned blocks versus small, frequent updates, often has a greater impact on throughput than the underlying communication protocol itself. The SDMMC protocol, combined with an optimized firmware design that writes large data chunks, offers the best foundation for a high-throughput data logging system.
+
+
+5.3. Performance Analysis and File Systems
+
+
+A continuous, multi-channel audio stream generates a high volume of data. For a standard audio configuration of 16-bit, 2-channel audio at a 40 kHz sample rate, the system must handle a constant data rate of 160 KB/s. This high rate makes robust data management and buffering essential. SD cards can periodically introduce significant delays due to internal processes like wear leveling and sector erasing.44 These unpredictable delays can cause data loss if the system's buffer is not large enough to accommodate the incoming audio data while the SD card is busy.
+This is where the ESP32-S3’s PSRAM becomes invaluable. It can be used to implement a large buffer that absorbs these temporary delays, ensuring the continuous audio stream is not interrupted. A multi-threaded architecture can manage this by having a dedicated task that continuously fills the PSRAM buffer from the I2S peripheral, while a separate task empties the buffer and writes the data to the SD card when the card is available.44
+The ESP32-S3 supports various file systems, including FAT16, FAT32, and exFAT.39 The FAT file systems are widely compatible but have limitations such as a 4 GB file size limit for FAT16/FAT32 and a vulnerability to data corruption from sudden power loss.48 The
+SdFat.h library offers superior support for exFAT, which provides better handling of large files and improved contiguous write performance, a major benefit for audio logging.39
+A comparative summary of the SD card protocols is provided below.
+Protocol
+	Pin Requirement
+	Typical Speed (KB/s)
+	Key Library
+	Pros
+	Cons
+	SPI
+	4 pins (MISO, MOSI, SCK, CS)
+	200–900 KB/s (highly variable)
+	SD.h, SdFat.h
+	Widely supported, simple to wire, minimal pins
+	Lower speed, single data line, performance highly dependent on implementation
+	SDMMC
+	4-8 pins (CMD, CLK, D0-D7)
+	1-4 MB/s (in 4-bit mode)
+	SD_MMC.h
+	High performance, native to ESP32-S3, multi-bit transfer
+	Requires specific pins, more complex wiring
+	
+
+6. System Integration and Optimization
+
+
+
+
+6.1. The Complete System Architecture
+
+
+A robust, integrated system for high-fidelity, multi-channel audio recording on the ESP32-S3 can be conceptualized as a multi-layered architecture.
+1. Input Layer: An I2S microphone array, such as one built with INMP441 modules, serves as the audio front-end. It continuously captures digital audio data at a high sample rate.
+2. Processing Layer: The ESP32-S3 SoC, with its I2S peripheral and DMA controller, handles the continuous audio stream, storing it in large buffers allocated in PSRAM. One core of the dual-core processor can be dedicated to running a FreeRTOS task that manages this data capture.
+3. Data Persistence Layer: A separate FreeRTOS task, running on the second CPU core, is responsible for writing the buffered data to the micro-SD card via the high-speed SDMMC host peripheral. This task can be designed to write large data blocks, maximizing throughput and minimizing the impact of the SD card's internal management processes.
+
+
+6.2. Tackling Noise: Power Supply and Signal Integrity
+
+
+A major source of high noise in ESP32 analog readings is an unstable power supply, particularly when powering sensors directly from the board's 3.3V pin.25 The power consumption of peripherals like the Wi-Fi radio can cause voltage drops and fluctuations that introduce noise into the audio signal.
+To mitigate this, a tiered approach is recommended. On the hardware side, a project should use an external, low-dropout (LDO) regulator to provide a clean, stable power source for the microphone boards.21 Additionally, a bypass or decoupling capacitor (e.g., a 100 nF ceramic capacitor) should be connected to the analog input pad to filter out high-frequency noise.24 On the software side, techniques such as multisampling and averaging can be employed to further smooth out noisy readings.23
+
+
+6.3. Firmware Best Practices
+
+
+A well-engineered firmware architecture is paramount for this project. Instead of a simple loop() function, a multi-threaded design using the FreeRTOS framework is essential for managing the concurrent demands of audio capture and data writing.8 One task can be configured to continuously read from the I2S peripheral, while a second task is responsible for writing the data to the SD card. These tasks can communicate via a FreeRTOS queue, which provides a thread-safe method for passing data buffers between them.44 This design is a robust solution for dealing with the unpredictable delays that an SD card can introduce, as the capture task can continue to fill the buffer in PSRAM while the writing task waits for the card to become available.44 The strategy of writing data in large, contiguous blocks, such as 512 bytes or 4096 bytes, is a critical optimization that significantly improves SD card write performance.40
+
+
+7. Conclusions & Recommendations
+
+
+This analysis demonstrates that building a sophisticated, high-performance audio system on the ESP32-S3 requires careful consideration of both hardware and software architecture.
+* The ESP32-S3 is a highly capable platform, but its internal ADCs are fundamentally unsuited for high-fidelity audio due to noise susceptibility and a direct conflict with Wi-Fi functionality. The I2S peripheral, with its dedicated DMA controller, provides a robust, CPU-efficient alternative for continuous audio streaming.
+* For data persistence, the SDMMC protocol in 4-bit mode provides the necessary throughput to handle the high data rates of multi-channel audio. While a simple SPI-based solution may seem adequate at first, it is prone to performance bottlenecks that can lead to data loss.
+* The firmware should be architected around a multi-threaded FreeRTOS model, leveraging the ESP32-S3’s dual cores and large PSRAM for buffering. This approach is essential to manage the real-time demands of audio capture while accommodating the intermittent delays inherent in SD card write operations.
+* Finally, a successful project must address electrical noise at its source. Hardware interventions, such as dedicated power regulators and decoupling capacitors, are necessary to ensure a clean audio signal, and software techniques like multisampling can provide an additional layer of noise mitigation.
+By following these recommendations, a developer can move beyond a simple, demonstrative project to a truly robust and reliable system for deep audio research or data logging. Further advancements could include adding real-time audio compression algorithms, such as ADPCM, to reduce file size or implementing advanced signal processing techniques, such as beamforming, for more sophisticated audio applications.
+Works cited
+1. ESP32-S3 Super Mini Development Board Details, Pinout, Specs - ESPBoards, accessed August 24, 2025, https://www.espboards.dev/esp32/esp32-s3-super-mini/
+2. esp32-s3-mini-1_mini-1u_datasheet_en.pdf - Sparkfun, accessed August 24, 2025, https://cdn.sparkfun.com/assets/f/7/b/0/0/esp32-s3-mini-1_mini-1u_datasheet_en.pdf
+3. Arduino Nano ESP32 User Manual, accessed August 24, 2025, https://docs.arduino.cc/tutorials/nano-esp32/cheat-sheet/
+4. ESP32-S3 DevKitC Pinout Reference Guide: GPIOs Explained - Random Nerd Tutorials, accessed August 24, 2025, https://randomnerdtutorials.com/esp32-s3-devkitc-pinout-guide/
+5. Inter-IC Sound (I2S) - ESP32-S3 - — ESP-IDF Programming Guide v5.5 documentation, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/i2s.html
+6. s60sc/ESP32-CAM_MJPEG2SD: ESP32 Camera motion capture application to record JPEGs to SD card as AVI files and stream to browser as MJPEG. If a microphone is installed then a WAV file is also created. Files can be uploaded via FTP or downloaded to browser. - GitHub, accessed August 24, 2025, https://github.com/s60sc/ESP32-CAM_MJPEG2SD
+7. Tutorial: Writing and reading to SD cards - YouTube, accessed August 24, 2025, https://www.youtube.com/watch?v=yr6vejsvxQw
+8. Record & Playback Audio on ESP32 SD Card: Step-by-Step Guide & Demo - YouTube, accessed August 24, 2025, https://www.youtube.com/watch?v=bVru6M862HY
+9. Sound with ESP32 - I2S Protocol | DroneBot Workshop, accessed August 24, 2025, https://dronebotworkshop.com/esp32-i2s/
+10. ESP32 Audio Input Using I2S and Internal ADC | atomic14, accessed August 24, 2025, https://www.atomic14.com/videos/posts/pPh3_ciEmzs
+11. ADC filter - General Electronics - Arduino Forum, accessed August 24, 2025, https://forum.arduino.cc/t/adc-filter/637630
+12. ESP32-S3 Basic ADC Programming - Phipps Electronics, accessed August 24, 2025, https://www.phippselectronics.com/esp32-s3-basic-adc-programming/
+13. ESP32 ADC – Read Analog Values with Arduino IDE - Random Nerd Tutorials, accessed August 24, 2025, https://randomnerdtutorials.com/esp32-adc-analog-read-arduino-ide/
+14. ADC - - — Arduino ESP32 latest documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/arduino-esp32/en/latest/api/adc.html
+15. Analog to Digital Converter (ADC) - ESP32-S3 - — ESP-IDF Programming Guide release-v4.4 documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32s3/api-reference/peripherals/adc.html
+16. Analog to Digital Converter (ADC) - ESP32 - — ESP-IDF Programming Guide release-v4.4 documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/api-reference/peripherals/adc.html
+17. I2S Sound Tutorial for ESP32 - DIYI0T, accessed August 24, 2025, https://diyi0t.com/i2s-sound-tutorial-for-esp32/
+18. How to Detect the Direction of Sound Using Arduino? - Circuit Digest, accessed August 24, 2025, https://circuitdigest.com/microcontroller-projects/how-to-detect-the-direction-of-sound-using-arduino
+19. Electret Microphone Amp MAX9814 - Micro Robotics, accessed August 24, 2025, https://www.robotics.org.za/MAX9814-MOD
+20. How to Use the MAX9814 Microphone Module with Arduino - 38-3D, accessed August 24, 2025, https://38-3d.co.uk/blogs/blog/how-to-use-the-max9814-microphone-module-with-arduino
+21. ESP32 Audio Input Using I2S and Internal ADC - YouTube, accessed August 24, 2025, https://www.youtube.com/watch?v=pPh3_ciEmzs
+22. MAX9814 - Microphone Amplifier with AGC and ... - Analog Devices, accessed August 24, 2025, https://www.analog.com/media/en/technical-documentation/data-sheets/max9814.pdf
+23. ADC voltage spikes when WiFi is being used : r/esp32 - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/l7zzrl/adc_voltage_spikes_when_wifi_is_being_used/
+24. ESP32 - Excessive Noise for Analog Read - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/unm8pt/esp32_excessive_noise_for_analog_read/
+25. esp32 internal ADC noise is highly elevated when using spi and i2c ..., accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/171i83i/esp32_internal_adc_noise_is_highly_elevated_when/
+26. [ESP32-S3] SD card works fine under SDSPI driver, but just won't work under SDMMC driver, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/1959iyx/esp32s3_sd_card_works_fine_under_sdspi_driver_but/
+27. i2s mic -> sdcard most recent/ best quality libraries for high fidelity : r/esp32 - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/1ls22y3/i2s_mic_sdcard_most_recent_best_quality_libraries/
+28. ESP32-S3 - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/esp-sr-en-master-esp32s3.pdf
+29. Detecting audio frequencies to determine a position. : r/esp32 - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/1alskqs/detecting_audio_frequencies_to_determine_a/
+30. ReSpeaker Mic Array v2.0 | Seeed Studio Wiki, accessed August 24, 2025, https://wiki.seeedstudio.com/ReSpeaker_Mic_Array_v2.0/
+31. Espressif Microphone Design Guidelines - ESP32-S3 - — ESP-SR ..., accessed August 24, 2025, https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/audio_front_end/Espressif_Microphone_Design_Guidelines.html
+32. SPI Protocol - Prodigy Technovations, accessed August 24, 2025, https://www.prodigytechno.com/spi-protocol
+33. Understanding SPI Protocol in IoT: Key Features, Advantages, and Comparison, accessed August 24, 2025, https://www.cavliwireless.com/blog/not-mini/role-of-spi-protocol-in-embedded-iot-devices
+34. ESP32-S3 Pin Reference - FluidNC Wiki, accessed August 24, 2025, http://wiki.fluidnc.com/en/hardware/ESP32-S3_Pin_Reference
+35. SD | Arduino Documentation, accessed August 24, 2025, https://www.arduino.cc/en/Reference/SD
+36. Using an SD Card with the ESP32 [Guide + Code] - Programming Electronics Academy, accessed August 24, 2025, https://www.programmingelectronics.com/esp-32-sd-card-test-and-hardware-setup/
+37. Using SdFat with ESPAsyncWebSrv - Nano ESP32 - Arduino Forum, accessed August 24, 2025, https://forum.arduino.cc/t/using-sdfat-with-espasyncwebsrv/1235655
+38. sdfat vs. sd - Storage - Arduino Forum, accessed August 24, 2025, https://forum.arduino.cc/t/sdfat-vs-sd/88146
+39. greiman/SdFat: Provides access to SD memory cards. The SdFat library… - PlatformIO Registry, accessed August 24, 2025, https://registry.platformio.org/libraries/greiman/SdFat
+40. SD SPI works very fast on Arduino IDE but is extremely slow on ESP-IDF (takes 35 seconds to write a 1 MB file). Please help! - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/1lx938h/sd_spi_works_very_fast_on_arduino_ide_but_is/
+41. ESP32 SD Card Speedup With a Couple of Lines of Code | atomic14, accessed August 24, 2025, https://www.atomic14.com/videos/posts/ocXs1yxsux4
+42. Very slow write speed in SDMMC 1 bit mode on ESP32 s3, accessed August 24, 2025, https://esp32.com/viewtopic.php?t=45552
+43. SDMMC Host Driver - ESP32-S3 - — ESP-IDF Programming Guide v5.5 documentation, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/sdmmc_host.html
+44. SD card sector writes - ESP32 Forum, accessed August 24, 2025, https://esp32.com/viewtopic.php?t=15417
+45. Read/Write SD Card Sectors directly - Storage - Arduino Forum, accessed August 24, 2025, https://forum.arduino.cc/t/read-write-sd-card-sectors-directly/1313862
+46. Lab: Data Logging With an SD Card Reader using SPI Communication - ITP - NYU, accessed August 24, 2025, https://itp.nyu.edu/physcomp/labs/labs-serial-communication/lab-data-logging-with-an-sd-card-reader-using-spi-communication/
+47. How to Use SD Card Module: Examples, Pinouts, and Specs - Cirkit Designer Docs, accessed August 24, 2025, https://docs.cirkitdesigner.com/component/bfa8f93b-00b2-4cc7-8902-90a53b1544ae/sd-card-module
+48. File System Considerations - ESP32 - — ESP-IDF Programming Guide v5.5 documentation, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/file-system-considerations.html
+49. Analog to Digital Converter - ESP32 - — ESP-IDF Programming ..., accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/v4.2.3/esp32/api-reference/peripherals/adc.html#:~:text=0%2D4095).-,Minimizing%20Noise,mitigate%20the%20effects%20of%20noise.

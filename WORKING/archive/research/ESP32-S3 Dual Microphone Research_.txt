@@ -1,0 +1,362 @@
+﻿An Expert Analysis on Implementing a Dual-Microphone Audio System with the ESP32-S3-mini and MAX9814 Amplifiers
+
+
+
+
+Executive Summary: A Synthesis of Findings and Recommendations
+
+
+This report presents a detailed technical analysis of integrating two MAX9814 analog microphone amplifiers with an ESP32-S3-mini development board to capture dual-channel audio. The analysis concludes that while this project is technically feasible, the combination of hardware components introduces significant technical challenges that fundamentally limit its suitability for high-fidelity or professional-grade audio applications.
+The primary limitations stem from the ESP32's internal Analog-to-Digital Converter (ADC) subsystem. The ADC is characterized by non-linear behavior, susceptibility to ambient and on-board electrical noise—particularly from the Wi-Fi radio—and the inability to perform truly simultaneous, synchronized conversions across multiple channels. These factors degrade the "high-quality" analog signal provided by the MAX9814 amplifiers, making the system unsuitable for applications requiring precise phase correlation, such as stereo recording, acoustic echo cancellation, or Direction of Arrival (DoA) systems.
+For any application demanding consistent, high-fidelity, or synchronized multi-channel audio, the analysis strongly recommends an alternative approach: adopting a digital I2S (Inter-IC Sound) microphone solution. The ESP32-S3 is purpose-built with a dedicated I2S peripheral and Direct Memory Access (DMA) controller, which are designed for high-speed digital audio streaming. This pathway mitigates the analog noise issues, offloads the CPU for complex signal processing, and is natively configured for synchronized stereo or multi-channel inputs, offering a superior foundation for any serious audio project.
+This report provides a comprehensive guide for both the analog (MAX9814) and digital (I2S) implementation paths. It details hardware connections, software frameworks, and troubleshooting strategies, providing the reader with a clear understanding of the trade-offs and enabling an informed decision on the most appropriate path for their specific application.
+
+
+1. Introduction to the Project and Report Scope
+
+
+
+
+1.1. Project Goals: Capturing Dual-Channel Audio on the ESP32-S3
+
+
+The central objective of this project is to implement a two-microphone system utilizing the ESP32-S3-mini microcontroller and two MAX9814 analog microphone amplifiers. This endeavor moves beyond a simple, single-microphone setup to explore the complexities of dual-channel audio acquisition. A dual-microphone configuration serves as the foundational step for a wide range of advanced audio applications. These include fundamental stereo recording, more complex noise cancellation, and sophisticated sound source localization, also known as Direction of Arrival (DoA) systems.1 The project's inherent research goals extend to understanding the technical feasibility, identifying the performance characteristics, and recognizing the limitations of this specific hardware combination.
+
+
+1.2. Report Structure and Objectives
+
+
+This report is structured as a detailed technical analysis, akin to an academic white paper or an in-depth industry report. It begins with a thorough characterization of the core components: the ESP32-S3-mini development board and the MAX9814 amplifier. The analysis then transitions to an examination of the significant technical challenges posed by analog audio acquisition on the ESP32 platform. This is followed by a comparative study of alternative, more professional solutions, such as digital I2S microphones. The report culminates in a set of actionable, data-driven recommendations, including proposed hardware interconnections and software strategies. The primary objective is to provide a resource that not only guides implementation but also equips the reader with the foundational knowledge required to effectively troubleshoot, optimize, and innovate beyond the scope of this specific project.
+
+
+2. Component Characterization: A Deep Technical Dive
+
+
+This section provides a detailed breakdown of the two primary components central to this project: the ESP32-S3-mini and the MAX9814 microphone amplifier. Understanding the capabilities and limitations of each component is a prerequisite for a successful and effective implementation.
+
+
+2.1. The ESP32-S3-mini Microcontroller
+
+
+
+
+2.1.1. Core Specifications and Architecture
+
+
+The ESP32-S3-mini is a compact and powerful microcontroller, often based on the ESP32-S3 system-on-a-chip (SoC). It features a dual-core Xtensa LX7 processor that can operate at a maximum CPU frequency of 240 MHz.3 The board includes a rich set of on-chip memory, with 512 KB of SRAM and typically 4 MB of flash memory, providing ample space for both firmware and application data.3 For wireless connectivity, the ESP32-S3-mini natively supports Wi-Fi 802.11b/g/n and Bluetooth 5 (LE), making it a suitable choice for Internet of Things (IoT) applications.3 Its compact form factor and USB-C interface further enhance its appeal for embedded projects.3
+
+
+2.1.2. The Analog-to-Digital Converter (ADC) Subsystem
+
+
+The ESP32-S3 integrates two Successive Approximation Register (SAR) ADCs, collectively supporting up to 20 analog measurement channels.5 The ADC operates with a 12-bit resolution, which converts an analog voltage input in the range of 0V to 3.3V into a corresponding digital value between 0 and 4095.7 A key feature of this ADC is its programmable attenuation, which extends the measurable voltage range by attenuating the input signal. This attenuation can be set to various levels, including 0 dB (up to 800mV), 2.5 dB, 6 dB, and 11 dB (up to 2.6V), allowing for precise measurements across different voltage scales.7 The selection of the appropriate attenuation level is critical for maximizing the ADC's effective resolution and accuracy within a given input voltage range.
+
+
+2.1.3. Pinout Analysis: GPIO Mappings, Critical Pins, and Analog-Enabled GPIOs
+
+
+A crucial aspect of any embedded project is the correct selection of GPIO pins. The "ESP32-S3-mini" is a general name for a family of boards, and the labels on the board's pins (e.g., A0, A1) do not always correspond to the same underlying GPIO number or ADC channel on different models. For instance, the ESP32-S3 Super Mini board labels pins A0 to A5, which correspond to GPIOs 1 through 6.3 In contrast, a board like the Arduino Nano ESP32 maps analog pins A4 and A5 to ADC2 channels, which are distinct from the general ESP32-S3 GPIO mapping.8 This variation underscores the necessity of consulting the specific pinout documentation for the board model in use. The GPIO number is the definitive reference for pin functionality, not the board-specific labels.
+It is also vital to avoid certain GPIOs that are reserved for critical system functions. Pins such as IO9, IO10, IO11, and IO12 are connected to the integrated SPI flash on the module and should not be used for other purposes, as doing so can interfere with flash communication and even prevent the device from booting.3 Similarly, GPIOs IO3, IO45, and IO46 are strapping pins used during boot for functions like setting the flash voltage or boot mode, and their use in a project can lead to unpredictable behavior.3 A careful review of the board's pinout is therefore a mandatory first step to prevent functional conflicts.
+
+
+2.2. The MAX9814 Automatic Gain Control (AGC) Microphone Amplifier
+
+
+The MAX9814 is a low-cost, high-quality microphone amplifier that is well-suited for a variety of audio applications. Its integrated circuitry simplifies the process of conditioning an analog microphone signal for a microcontroller's ADC.
+
+
+2.2.1. Operational Principles
+
+
+The internal architecture of the MAX9814 is a cascaded system of amplifiers designed to handle a wide dynamic range of audio inputs.9 The signal path begins with a low-noise preamplifier that provides a fixed 12 dB of gain. This is followed by a Variable Gain Amplifier (VGA) which automatically adjusts its gain from 0 dB to 20 dB. The signal then passes to an output amplifier, which offers three selectable gain settings: 8 dB, 18 dB, and 28 dB. The combined effect of these stages results in an overall system gain of 40 dB, 50 dB, or 60 dB, programmable via a trilevel digital input.9
+
+
+2.2.2. Programmable Gain and AGC Functionality
+
+
+The MAX9814's standout feature is its Automatic Gain Control (AGC).9 The AGC is an analog control circuit that dynamically adjusts the VGA's gain in response to the output signal level. When a sudden loud sound is detected, the AGC reduces the gain to prevent the output from clipping or exceeding the ADC's maximum input voltage. This ensures a consistent output level, making the device ideal for applications where sound levels can vary wildly, such as voice recognition or sound-activated systems.11 The trilevel digital input allows the user to program the maximum gain setting, providing a simple way to optimize the amplifier for a specific application's sensitivity requirements.10
+
+
+2.2.3. Key Electrical Characteristics
+
+
+The MAX9814 is highly compatible with the ESP32-S3-mini's power requirements. It operates on a wide supply voltage range of 2.7V to 5.5V, allowing it to be powered directly from the ESP32's 3.3V rail without additional voltage regulation.9 The amplifier is specified for a low input-referred noise density of 30 nV/√Hz and a typical total harmonic distortion (THD) of 0.04%, indicating its ability to provide a clean, high-quality analog signal.9
+
+
+3. The Challenge of Analog Audio Acquisition
+
+
+While the ESP32-S3 and the MAX9814 appear to be a compatible and straightforward combination, using the microcontroller's internal ADC for high-quality audio acquisition presents a number of significant technical hurdles. These challenges fundamentally limit the performance of the system and must be addressed for a successful project.
+
+
+3.1. ESP32 ADC Limitations for High-Fidelity Audio
+
+
+
+
+3.1.1. Non-Linearity and Attenuation Effects
+
+
+The ESP32's ADC is not a perfect linear converter. Its behavior is non-linear, especially at the extreme ends of its measurement range.7 For example, the ADC is often unable to distinguish between very low voltages (0V and 0.1V) or very high voltages (3.2V and 3.3V).7 This non-linearity means that a simple
+analogRead() function, which returns a non-calibrated value, will not provide an accurate representation of the input voltage across the entire range.6 To achieve precise voltage readings, especially for audio, the ADC must be calibrated. The ESP-IDF framework provides APIs for this purpose, such as the
+adc_cali_raw_to_voltage() function, which converts raw ADC data to a calibrated voltage value.6
+
+
+3.1.2. Inherent Noise and Unpredictability
+
+
+The ESP32's ADC is known to be highly sensitive to noise, which can lead to significant discrepancies and randomness in its readings.13 The MAX9814, with its low noise and distortion characteristics, is designed to produce a high-quality analog signal.9 However, this clean signal must be converted by the ESP32's ADC, which acts as a bottleneck. The quality of the final digital audio is thus determined not by the microphone amplifier, but by the inherent noise and limitations of the ADC itself. This creates a situation where a component designed for high-quality audio is connected to a peripheral that is prone to signal corruption, effectively negating the benefits of the external amplifier.15 The unpredictable nature of this noise makes it difficult to filter out entirely in software without also degrading the intended audio signal.
+
+
+3.2. Power Supply and Electromagnetic Interference (EMI)
+
+
+
+
+3.2.1. Noise from On-Board Components and Wi-Fi Coexistence Issues
+
+
+A primary source of noise on the ESP32-S3 is its own on-board wireless peripherals. The Wi-Fi and Bluetooth radios generate electromagnetic interference that can couple with the ADC, leading to excessive noise and signal spikes in the readings.13 A more critical issue, explicitly noted by a user and confirmed by the documentation, is a fundamental hardware conflict: ADC2 pins cannot be used reliably when Wi-Fi is active.7 This is not a software issue but is caused by internal power routing within the chip; enabling the Wi-Fi radio diverts power from the ADC2 peripheral, rendering its readings unreliable.7 This means that for any project requiring Wi-Fi connectivity, the number of available analog input pins is reduced to only those on ADC1.
+
+
+3.2.2. Hardware-Based Filtering and Decoupling Strategies
+
+
+To mitigate these power-related noise issues, hardware solutions are required. A common practice is to connect a bypass or decoupling capacitor, such as a 100 nF ceramic capacitor, to the ADC input pad. This component helps to smooth out voltage ripples and absorb noise.14 A more robust solution involves providing a separate, clean power supply for the microphones. Using a low-dropout (LDO) voltage regulator to generate a stable 3.3V source for the MAX9814 modules can significantly reduce noise originating from fluctuations on the main power rail of the ESP32 development board.7
+
+
+3.3. Dual-Channel Analog Sampling and Synchronization
+
+
+
+
+3.3.1. GPIO Selection for Two Channels
+
+
+Given the ADC2/Wi-Fi conflict, the selection of GPIOs for a dual-microphone setup is constrained to the ADC1 group.5 A careful review of the pinout is required to select two available ADC1-enabled pins that are not reserved for other critical functions.3
+
+
+3.3.2. The Challenge of Simultaneous Conversion
+
+
+Perhaps the most significant challenge for a dual-microphone project using analog inputs is achieving true sample synchronization. The ESP32's ADC is a single, multiplexed peripheral, meaning it can only perform one conversion at a time. The standard approach of using a fast loop with two consecutive analogRead() calls will create a small but non-zero time delay between the two channels.7 For a high-frequency audio signal, even a delay of a few microseconds results in a measurable phase shift between the two signals. This timing error can critically corrupt the data required for applications that rely on phase correlation, such as Direction of Arrival (DoA) systems.19 DoA algorithms operate by measuring the minute time difference between a sound wave arriving at each microphone to triangulate the source's angle.1 The built-in ADC's inability to perform simultaneous conversions therefore makes a naive analog approach an engineering dead end for any project that relies on precise phase information.
+
+
+4. Advanced and Recommended Implementation Strategies
+
+
+Having established the limitations of a simple analog approach, this section introduces and analyzes more robust and professional-grade solutions. A comparative analysis will demonstrate why certain alternatives are fundamentally superior for high-quality audio acquisition.
+
+
+4.1. The I2S Digital Audio Alternative: A Comparative Analysis
+
+
+
+
+4.1.1. The I2S Protocol: Principles and Benefits
+
+
+The I2S (Inter-IC Sound) protocol is a synchronous serial communication standard specifically designed for transferring digital audio data.20 It provides a dedicated, high-speed pathway for audio that completely bypasses the limitations of the ESP32's general-purpose ADC. The ESP32-S3 has two I2S peripherals (I2S0 and I2S1).20 A key advantage of the I2S peripheral is its integration with a Direct Memory Access (DMA) controller. DMA enables the continuous streaming of audio samples directly into a RAM buffer without requiring constant CPU intervention.20 This offloading of data transfer frees the main CPU for other tasks, such as Wi-Fi communication or complex signal processing, and ensures a consistent and jitter-free sampling rate, which is paramount for audio fidelity.
+
+
+4.1.2. Pros and Cons of Analog (ADC) vs. Digital (I2S) Audio
+
+
+This is a critical point of comparison for the project. While analog microphones like the MAX9814 are cost-effective and simple to use for basic sound detection, the I2S digital path is fundamentally superior for any serious audio application. The analog approach is plagued by the limitations discussed in Section 3: poor ADC quality, susceptibility to noise, high CPU load at higher sampling rates, and the inability to achieve true synchronization for multi-channel acquisition.22
+Conversely, the I2S path overcomes these issues by using a microphone with a built-in ADC (e.g., the INMP441, a 24-bit I2S MEMS microphone).20 This approach results in high-quality, low-noise digital audio directly from the source. Since the I2S protocol is designed for stereo and multi-channel streams, it natively supports true synchronization, making it the ideal choice for applications like DoA and stereo recording.21 The use of DMA ensures minimal CPU overhead, allowing for a much more responsive and powerful system.22
+Criterion
+	Analog (MAX9814)
+	Digital (I2S)
+	Signal Quality
+	Limited by noisy, non-linear ESP32 ADC. Susceptible to EMI and power supply noise.
+	High quality, low noise. A 24-bit resolution is common.
+	CPU Load
+	High, especially at high sample rates, requiring constant polling.
+	Very low due to DMA, frees up CPU for processing.
+	Multi-Channel Sync
+	Not possible due to single ADC. Leads to non-simultaneous, sequentially read data.
+	Natively supported. True synchronized sampling is a core feature.
+	Hardware Complexity
+	Simpler wiring for single channel, but requires external filtering for noise mitigation.
+	Requires three wires (SCK, WS, SD) per I2S mic. More complex for multiple mics, but simpler overall from a signal integrity perspective.
+	Cost
+	Low cost per channel.
+	Slightly higher cost per microphone, but offers a better return on investment for audio projects.
+	
+
+4.2. Leveraging Software Frameworks for Audio Processing
+
+
+To build on these advanced hardware solutions, it is necessary to use the appropriate software frameworks that can manage the complexities of audio data.
+
+
+4.2.1. The ESP-IDF Continuous ADC Mode
+
+
+The ESP-IDF provides a continuous ADC mode that is a significant improvement over the basic analogRead() function.23 This mode, which uses the I2S0 peripheral as a hardware DMA FIFO, allows for the continuous scanning of multiple ADC channels and the streaming of data into a buffer. This provides a more consistent and predictable sampling process than the simple, one-shot mode. While this method still does not resolve the fundamental non-simultaneous nature of multi-channel ADC conversion, it does offer a robust way to collect sequential data from multiple pins at a more consistent rate.23
+
+
+4.2.2. Introduction to the ESP-SR Audio Front-end (AFE) Framework
+
+
+For projects involving advanced audio processing, Espressif Systems provides a powerful Audio Front-end (AFE) framework as part of its ESP-SR (Speech Recognition) library.25 This framework is designed for applications such as speech recognition and voice communication. It includes a suite of sophisticated algorithms such as Acoustic Echo Cancellation (AEC), Noise Suppression (NS), and Voice Activity Detection (VAD).25 Crucially, the framework supports "two-mic processing," including algorithms like Blind Source Separation (BSS), which can isolate a target sound source from background interference.25 The existence and capabilities of this framework demonstrate that multi-microphone audio is a well-supported and a key use case for the ESP32-S3, justifying the need for a high-quality data acquisition pathway to feed these advanced algorithms.
+
+
+5. Project Recommendations and Conclusion
+
+
+
+
+5.1. Proposed Hardware Interconnection and Pin Assignments
+
+
+Based on the analysis, this section provides definitive hardware recommendations for both the analog and digital approaches. For any project, a careful selection of GPIO pins is the first and most critical step.
+
+
+5.1.1. Analog Path (MAX9814)
+
+
+For a dual-microphone system using the MAX9814 amplifiers, the ESP32's ADC1 must be used to avoid conflicts with Wi-Fi.7 The following table provides a recommended pinout that utilizes two separate ADC1 channels for the two microphones.
+Function
+	ESP32-S3-mini Pin
+	ESP32 GPIO #
+	ADC Channel
+	Notes
+	MAX9814 #1
+	
+
+	
+
+	
+
+	
+
+	VCC
+	VDD (3.3V)
+	3.3V
+	
+
+	Provides a stable power source.
+	GND
+	GND
+	GND
+	
+
+	Ground connection.
+	OUT
+	A0
+	1
+	ADC1_CH0
+	Recommended analog input for Microphone #1.
+	MAX9814 #2
+	
+
+	
+
+	
+
+	
+
+	VCC
+	VDD (3.3V)
+	3.3V
+	
+
+	Provides a stable power source.
+	GND
+	GND
+	GND
+	
+
+	Ground connection.
+	OUT
+	A1
+	2
+	ADC1_CH1
+	Recommended analog input for Microphone #2.
+	This configuration uses GPIOs from the ADC1 group, ensuring compatibility with Wi-Fi.3 The use of two distinct GPIOs allows for separate analog-to-digital conversions, though it does not provide true synchronization. For noise mitigation, it is recommended to place a 0.1 uF capacitor between the MAX9814's OUT pin and the ESP32's GND for each channel.14
+
+
+5.1.2. Digital Path (I2S)
+
+
+For the recommended digital approach, the wiring is different. An I2S microphone array requires connections for the Serial Clock Line (SCK), the Word Select (WS) line, and a Serial Data (SD) line for each microphone.20 These pins can be mapped to any available GPIO on the ESP32-S3, leveraging the microcontroller's flexible I/O matrix.26
+
+
+5.2. A Conceptual Software Walkthrough for Dual-Channel Acquisition
+
+
+
+
+5.2.1. Analog Path (Arduino IDE)
+
+
+A basic software implementation for the analog path can use the analogRead() function to sample each microphone sequentially within a loop.7 To address noise, multisampling and averaging can be implemented by taking a number of readings and calculating their average, which helps to smooth out random spikes.13 It is important to remember that this approach is suitable only for basic, low-frequency sound detection and will not yield high-quality, synchronized audio.
+
+
+5.2.2. Digital Path (ESP-IDF/Arduino Frameworks)
+
+
+For the digital path, a higher-level software framework is necessary. A typical implementation would involve configuring the I2S peripheral to capture data from a stereo or multi-channel source and routing that data into a DMA buffer.23 The program would then access the data from this buffer for further processing, such as applying filters or running voice recognition algorithms. This workflow avoids the complexities of low-level ADC management and provides a clean, continuous stream of audio data.
+
+
+5.3. Final Recommendations: A Definitive Path Forward
+
+
+The analysis and comparative study lead to a clear conclusion: the choice of implementation path depends entirely on the project's performance requirements.
+For Low-Fidelity/Hobbyist Use: The MAX9814 with the proposed hardware and software modifications is an excellent educational tool. It is well-suited for simple sound-activated projects, such as a clap-on light or a basic sound level meter, as it provides a low-cost and relatively simple introduction to analog-to-digital conversion.
+For High-Fidelity/Professional Research: The optimal and most reliable solution is to transition to a digital I2S microphone array. This approach is purpose-built for high-quality audio and overcomes the fundamental limitations of the ESP32's ADC. It provides a robust foundation for building advanced applications such as voice command interfaces, speaker localization systems, or high-fidelity audio recorders.
+Criterion
+	Analog (MAX9814)
+	Digital (I2S)
+	Primary Use Case
+	Basic sound detection, volume metering.
+	High-fidelity audio capture, voice recognition, Direction of Arrival (DoA).
+	Signal Quality
+	Compromised by ESP32 ADC's non-linearity and noise.
+	Superior due to digital signal path and external, high-resolution ADC.
+	Synchronization
+	Not possible. Conversions are sequential, introducing phase shift.
+	Natively synchronized via I2S protocol, essential for stereo and DoA.
+	CPU Overhead
+	High for high sample rates due to polling.
+	Low due to DMA controller; CPU is free for signal processing.
+	Wi-Fi Coexistence
+	Limited to ADC1 pins; ADC2 is unusable.
+	No conflict; uses dedicated I2S peripheral, freeing all ADC pins.
+	Overall Recommendation
+	Suitable for learning and simple hobby projects.
+	Recommended for serious research and professional applications.
+	
+
+5.4. Conclusion
+
+
+The ESP32-S3 is an incredibly powerful platform with a versatile set of peripherals. However, its internal ADC subsystem, while functional for general-purpose sensing, acts as a bottleneck for high-fidelity audio acquisition. The inherent non-linearity, susceptibility to noise, and single-channel limitation of the ADC degrade the clean signal from the MAX9814. This report has laid the groundwork for the user to make an informed, expert-level decision for their project. The central finding is that while the analog path with the MAX9814 is a valid educational and hobbyist endeavor, for a truly professional or research-oriented dual-microphone project, the recommended path forward is to embrace the I2S peripheral and its dedicated DMA. This approach provides a robust, high-performance foundation that is free from the analog noise and synchronization issues that would otherwise limit the project's potential.
+Works cited
+1. How to Detect the Direction of Sound Using Arduino? - Circuit Digest, accessed August 24, 2025, https://circuitdigest.com/microcontroller-projects/how-to-detect-the-direction-of-sound-using-arduino
+2. The Role of Microphone Arrays in Voice AI: How ReSpeaker Makes It Possible - YouTube, accessed August 24, 2025, https://www.youtube.com/watch?v=Mc7UI3ZoLLA
+3. ESP32-S3 Super Mini Development Board Details, Pinout, Specs - ESPBoards, accessed August 24, 2025, https://www.espboards.dev/esp32/esp32-s3-super-mini/
+4. esp32-s3-mini-1_mini-1u_datasheet_en.pdf - Sparkfun, accessed August 24, 2025, https://cdn.sparkfun.com/assets/f/7/b/0/0/esp32-s3-mini-1_mini-1u_datasheet_en.pdf
+5. ESP32-S3 DevKitC Pinout Reference Guide: GPIOs Explained ..., accessed August 24, 2025, https://randomnerdtutorials.com/esp32-s3-devkitc-pinout-guide/
+6. Analog to Digital Converter (ADC) - ESP32-S3 - — ESP-IDF Programming Guide release-v4.4 documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32s3/api-reference/peripherals/adc.html
+7. ESP32 ADC – Read Analog Values with Arduino IDE - Random Nerd Tutorials, accessed August 24, 2025, https://randomnerdtutorials.com/esp32-adc-analog-read-arduino-ide/
+8. Arduino Nano ESP32 User Manual, accessed August 24, 2025, https://docs.arduino.cc/tutorials/nano-esp32/cheat-sheet/
+9. MAX9814 - Microphone Amplifier with AGC and ... - Analog Devices, accessed August 24, 2025, https://www.analog.com/media/en/technical-documentation/data-sheets/max9814.pdf
+10. Electret Microphone Amp MAX9814 - Micro Robotics, accessed August 24, 2025, https://www.robotics.org.za/MAX9814-MOD
+11. How to Use the MAX9814 Microphone Module with Arduino - 38-3D, accessed August 24, 2025, https://38-3d.co.uk/blogs/blog/how-to-use-the-max9814-microphone-module-with-arduino
+12. ESP32-S3 Basic ADC Programming - Phipps Electronics, accessed August 24, 2025, https://www.phippselectronics.com/esp32-s3-basic-adc-programming/
+13. ADC voltage spikes when WiFi is being used : r/esp32 - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/l7zzrl/adc_voltage_spikes_when_wifi_is_being_used/
+14. Analog to Digital Converter (ADC) - ESP32 - — ESP-IDF Programming Guide release-v4.4 documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/release-v4.4/esp32/api-reference/peripherals/adc.html
+15. ESP32 - Excessive Noise for Analog Read - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/unm8pt/esp32_excessive_noise_for_analog_read/
+16. esp32 internal ADC noise is highly elevated when using spi and i2c ..., accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/171i83i/esp32_internal_adc_noise_is_highly_elevated_when/
+17. Analog to Digital Converter - ESP32 - — ESP-IDF Programming ..., accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/v4.2.3/esp32/api-reference/peripherals/adc.html#:~:text=0%2D4095).-,Minimizing%20Noise,mitigate%20the%20effects%20of%20noise.
+18. ESP32 Audio Input Using I2S and Internal ADC - YouTube, accessed August 24, 2025, https://www.youtube.com/watch?v=pPh3_ciEmzs
+19. Detecting audio frequencies to determine a position. : r/esp32 - Reddit, accessed August 24, 2025, https://www.reddit.com/r/esp32/comments/1alskqs/detecting_audio_frequencies_to_determine_a/
+20. Sound with ESP32 - I2S Protocol | DroneBot Workshop, accessed August 24, 2025, https://dronebotworkshop.com/esp32-i2s/
+21. Inter-IC Sound (I2S) - ESP32-S3 - — ESP-IDF Programming Guide v5.5 documentation, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/i2s.html
+22. ESP32 Audio Input Using I2S and Internal ADC | atomic14, accessed August 24, 2025, https://www.atomic14.com/videos/posts/pPh3_ciEmzs
+23. Analog to Digital Converter (ADC) Continuous Mode Driver - ESP32 - — ESP-IDF Programming Guide v5.1 documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-idf/en/v5.1/esp32/api-reference/peripherals/adc_continuous.html
+24. ESP32#9 How to use ADC || PART 2 || Continuous Mode || Multiple Channels - YouTube, accessed August 24, 2025, https://www.youtube.com/watch?v=IIHL7dtKgZg
+25. ESP32-S3 - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/esp-sr-en-master-esp32s3.pdf
+26. GPIO Matrix and Pin Mux - - — Arduino ESP32 latest documentation - Espressif Systems, accessed August 24, 2025, https://docs.espressif.com/projects/arduino-esp32/en/latest/tutorials/io_mux.html

@@ -7,12 +7,9 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_timer.h"
-#include <dirent.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <string.h>
-#include <strings.h>   // for strcasecmp
-#include <time.h>
 #include <unistd.h>
 
 static const char *TAG = "sd_storage";
@@ -401,63 +398,4 @@ esp_err_t sd_storage_test_write_access(void) {
         ESP_LOGE(TAG, "SD card write access failed (0/%d tests passed)", 3);
         return ESP_FAIL;
     }
-}
-
-static void log_raw_files(const char *dir)
-{
-    DIR *d = opendir(dir);
-    if (!d) { ESP_LOGW(TAG, "opendir(%s) failed, errno=%d", dir, errno); return; }
-
-    struct dirent *e;
-    int count = 0;
-
-    while ((e = readdir(d)) != NULL) {
-        if (e->d_name[0] == '.') continue;              // skip . and ..
-        size_t L = strlen(e->d_name);
-        if (L >= 4 && strcasecmp(e->d_name + (L-4), ".raw") == 0) {
-
-            char path[SD_MAX_PATH];
-
-            // Build path safely and verify it fit
-            int n = snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
-            if (n < 0 || n >= (int)sizeof(path)) {
-                ESP_LOGW(TAG, "Path too long, skipping: %s/%s", dir, e->d_name);
-                continue;
-            }
-
-            struct stat st;
-            if (stat(path, &st) == 0) {
-                char tbuf[24] = "?";
-                struct tm tmv;
-                time_t tt = st.st_mtime;
-                if (localtime_r(&tt, &tmv)) {
-                    strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
-                }
-                ESP_LOGI(TAG, "  %s (%llu bytes, mtime: %s)",
-                         path, (unsigned long long)st.st_size, tbuf);
-            } else {
-                ESP_LOGW(TAG, "  %s (stat failed, errno=%d)", path, errno);
-            }
-            count++;
-        }
-    }
-    closedir(d);
-
-    if (!count) ESP_LOGI(TAG, "  (no .raw files in %s)", dir);
-}
-
-// helper that prints both locations
-static void sd_dump_all(void) {
-    ESP_LOGI(TAG, "=== SD Card Contents ===");
-    log_raw_files("/sdcard/rec");
-    log_raw_files("/sdcard");
-    ESP_LOGI(TAG, "=== End SD Card Contents ===");
-}
-
-// HEADER-COMPATIBLE WRAPPER (matches sd_storage.h)
-esp_err_t sd_dump_contents(const char *directory_path)
-{
-    (void)directory_path;   // ignored, keeps signature compatible
-    sd_dump_all();
-    return ESP_OK;
 }

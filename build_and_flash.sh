@@ -1,0 +1,1 @@
+new_componet/softwareV3/build_and_flash.sh

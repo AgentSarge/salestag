@@ -17,10 +17,6 @@ extern "C" {
 #define SD_SCLK_PIN 36
 #define SD_SPI_FREQ_MHZ 10
 
-#ifndef SD_MAX_PATH
-#define SD_MAX_PATH 512   // enough for "/sdcard/rec" + "/" + 255-char filename + NUL
-#endif
-
 // SD card status
 typedef enum {
     SD_STATUS_UNMOUNTED = 0,
@@ -63,9 +59,6 @@ esp_err_t sd_storage_power_cycle(void);
 
 // Test write access with retry logic
 esp_err_t sd_storage_test_write_access(void);
-
-// Dump directory contents for debugging
-esp_err_t sd_dump_contents(const char* directory_path);
 
 #ifdef __cplusplus
 }

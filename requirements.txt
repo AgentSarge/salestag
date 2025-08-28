@@ -1,2 +1,2 @@
-requests>=2.25.0
-pathlib2>=2.3.0; python_version < "3.4"
+bleak>=0.21.0
+asyncio
